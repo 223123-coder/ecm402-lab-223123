@@ -1,1 +1,51 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import stats
+import pandas as pd
+from pathlib import Path
 
+np.random.seed(0)
+plt.rcParams["figure.dpi"] = 100
+plt.rcParams["axes.grid"] = True
+c = 3e8          # speed of light, m/s
+fc = 3.5e9       # carrier frequency, Hz (n78 band)
+d0 = 1.0         # reference distance, m
+
+FSPL_d0_theory = 20 * np.log10(4 * np.pi * d0 * fc / c)
+print(f"Theoretical free-space path loss at d0 = {d0} m, fc = {fc/1e9} GHz: "
+      f"FSPL(d0) = {FSPL_d0_theory:.3f} dB")
+
+
+def synthesize_pathloss(n_true, sigma_true, n_samples=150, d_min=10.0, d_max=1800.0, seed=1):
+    """Synthetic measurement campaign following the CI model:
+    PL(d) = FSPL(d0) + 10*n*log10(d/d0) + X_sigma,  X_sigma ~ N(0, sigma^2).
+    Distances are log-uniformly spaced, as is typical for a real drive-test measurement campaign.
+    """
+    rng = np.random.default_rng(seed)
+    log_d = rng.uniform(np.log10(d_min), np.log10(d_max), size=n_samples)
+    d = 10 ** log_d
+    shadowing = rng.normal(0, sigma_true, size=n_samples)
+    PL = FSPL_d0_theory + 10 * n_true * np.log10(d / d0) + shadowing
+    return d, PL
+
+
+DATA_PATH = Path("pathloss.txt")
+# Ground truth used ONLY for the synthetic fallback -- hidden from every fitting routine below.
+N_TRUE, SIGMA_TRUE = 3.0, 6.0
+
+if DATA_PATH.exists():
+    data = np.loadtxt(DATA_PATH)
+    d_meas, PL_meas = data[:, 0], data[:, 1]
+    print(f"Loaded REAL measurement file: {DATA_PATH} ({len(d_meas)} points).")
+else:
+    d_meas, PL_meas = synthesize_pathloss(N_TRUE, SIGMA_TRUE)
+    print(f"[Fallback] '{DATA_PATH}' not found -- using a synthetic measurement campaign "
+          f"(true n = {N_TRUE}, true sigma = {SIGMA_TRUE} dB, N = {len(d_meas)} points, "
+          f"d in [{d_meas.min():.1f}, {d_meas.max():.1f}] m).")
+
+plt.figure(figsize=(7, 4))
+plt.scatter(d_meas, PL_meas, s=12, alpha=0.6)
+plt.xscale("log")
+plt.xlabel("Distance d (m, log scale)"); plt.ylabel("Measured path loss (dB)")
+plt.title("Raw measurement data")
+plt.tight_layout(); plt.show()
